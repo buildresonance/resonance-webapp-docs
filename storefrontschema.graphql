@@ -134,6 +134,42 @@ type Checkout {
   updatedAt: Date!
 }
 
+"""An error that occurred during checkout validation"""
+type CheckoutError {
+  """A CompleteCheckoutErrorCode"""
+  code: CheckoutErrorCode!
+
+  """A JSON object containing specific details about the error"""
+  details: JSON
+
+  """A human readable error message"""
+  message: String!
+}
+
+"""Error codes for the CheckoutError type"""
+enum CheckoutErrorCode {
+  CHECKOUT_INVALID
+  CHECKOUT_NOT_FOUND
+  CHECKOUT_ORDER_INVALID
+  CHECKOUT_ORDER_ITEMS_INVALID
+  CHECKOUT_ORDER_ITEMS_NOT_FOUND
+  CHECKOUT_ORDER_ITEM_QUANTITY_NOT_FOUND
+  CHECKOUT_ORDER_NOT_FOUND
+  CUSTOMER_NOT_FOUND
+  FAILED_TO_COMPLETE_CHECKOUT
+  INSUFFICIENT_QUANTITY
+  INVALID_AUTHORIZE_NET_TRANSACTION
+  INVALID_ORDER_TRANSACTION
+  ORDER_INPUT_INVALID
+  ORDER_ITEMS_INVALID
+  ORDER_TAGS_INVALID
+  PRODUCT_NOT_FOUND
+  UNPROCESSED_ORDER_ITEMS
+  VARIANT_DUPLICATE
+  VARIANT_METRICS_NOT_FOUND
+  VARIANT_NOT_FOUND
+}
+
 """
 This is an order in the checkout process, pending creation.
 Nearly all fields are optional, but their existence is still required by the end
@@ -152,6 +188,7 @@ type CheckoutOrder {
   paymentId: ID
   phoneNumber: String
   shippingAddress: Address
+  shippingCharges: [OrderShippingCharge]
   tags: [String]
 }
 
@@ -169,6 +206,7 @@ input CheckoutOrderInput {
   paymentId: ID
   phoneNumber: String
   shippingAddress: AddressInput
+  shippingCharges: [OrderShippingChargeInput]
   tags: [String]
 }
 
@@ -179,13 +217,43 @@ of the checkout process if they are required for OrderItems.
 """
 type CheckoutOrderItem {
   customProperties: JSON
+
+  """
+  The aggregate amount of all discounts applied to the OrderItem, can be subtracted from the subtotal directly.
+  """
+  discountTotal: Float!
   discounts: [OrderItemDiscount]
+
+  """
+  The aggregate amount the consumer must pay for the item including price,
+  quantity, adjustments, discounts, shippingCharges, and taxes.
+  """
+  grandTotal: Float!
   note: String
   quantity: Int
-  shippingCharges: [OrderItemShippingCharge]
+  shippingCharges: [OrderShippingCharge]
+
+  """
+  The aggregate amount of all shipping charges applied to the OrderItem, can be added to the subtotal directly.
+  """
+  shippingChargesTotal: Float!
   shippingMethod: ShippingMethod
+
+  """
+  The aggregate amount of all taxes applied to the OrderItem, can be added to the subtotal directly.
+  """
+  taxTotal: Float!
   taxes: [OrderItemTax]
+
+  """Price per item, can be multiplied by quantity for total price"""
   unitPrice: Float
+
+  """
+  The variant that this checkout order item is associated with.
+          
+  Requires publicvariant/read permission on the requesting identity.
+  """
+  variant: PublicVariant
   variantId: ID!
 }
 
@@ -195,11 +263,28 @@ input CheckoutOrderItemInput {
   discounts: [OrderItemDiscountInput]
   note: String
   quantity: Int
-  shippingCharges: [OrderItemShippingChargeInput]
+  shippingCharges: [OrderShippingChargeInput]
   shippingMethod: ShippingMethod
   taxes: [OrderItemTaxInput]
+
+  """Price per item, can be multiplied by quantity for total price"""
   unitPrice: Float
   variantId: ID!
+}
+
+"""Create a CheckoutOrderTransaction"""
+input CheckoutOrderTransactionInput {
+  amount: Float!
+  authorizationCode: String
+  authorizationExpiresAt: Date
+  currency: ResonanceCurrency!
+  currencyExchangeAdjustment: OrderTransactionCurrencyExchangeAdjustmentInput
+  errorMessage: String
+  gateway: OrderTransactionGateway!
+  gatewayMessage: String
+  gatewayTransactionId: ID
+  orderTransactionType: OrderTransactionType!
+  processedAt: Date
 }
 
 """Indicates the type of checkout"""
@@ -240,16 +325,18 @@ type CollectionContent {
 """
 The number of results to return for each term aggregation. Defaults to 0 for each.
 """
-input CollectionNumberOfTermAggregations {
+input CollectionNumberOfTermAggregationsInput {
   collectionTypes: Int
   tags: Int
 }
 
 """Indicates which field to sort by"""
 enum CollectionSortField {
+  CREATED_AT
   PUBLISHED_AT
   RELEVANCE
   TITLE
+  UPDATED_AT
 }
 
 """Sort Collections by a field and direction."""
@@ -296,6 +383,13 @@ type CollectionTypeContentTags {
     key: String
   ): [ParsedTag]
   raw: [String!]
+}
+
+"""
+The process of checkout completion is asynchronous so there is no data (like an order id) to return to the caller.
+"""
+type CompleteCheckoutResponse {
+  message: String!
 }
 
 """
@@ -591,8 +685,6 @@ type CustomerTags {
 
 """Input for updating a Customer"""
 input CustomerUpdateInput {
-  customerId: ID!
-
   """
   The CustomerAddressId for the default billing address for this Customer
   """
@@ -704,6 +796,13 @@ type Mutation {
   ): Cart!
 
   """
+  Completes a checkout, queueing a request to create an order, orderItems, and orderTransaction.
+  
+  Requires the publiccheckout/write scope and a valid customerToken.
+  """
+  completeCheckout(customerToken: String!, orderTransactionInput: CheckoutOrderTransactionInput!): CompleteCheckoutResponse!
+
+  """
   Create a Customer.
   
   Requires the publiccustomer/write scope.
@@ -776,7 +875,7 @@ type Mutation {
   
   Requires the publiccheckout/write scope and a valid customerToken.
   """
-  validateCustomerCheckout(customerToken: String!): Checkout!
+  validateCustomerCheckout(customerToken: String!): ValidateCheckoutResponse!
 }
 
 """
@@ -857,18 +956,6 @@ type OrderItemPurchaseOrderItem {
   status: PurchaseOrderItemStatus!
 }
 
-"""A shippingCharge applied to an OrderItem."""
-type OrderItemShippingCharge {
-  amount: Float!
-  title: String
-}
-
-"""Create or Update an OrderItemShippingCharge"""
-input OrderItemShippingChargeInput {
-  amount: Float!
-  title: String
-}
-
 """Indicates the status of an OrderItem."""
 enum OrderItemStatus {
   ASSIGNED
@@ -905,10 +992,25 @@ input OrderItemTaxInput {
   title: String!
 }
 
+"""A shippingCharge applied to an Order."""
+type OrderShippingCharge {
+  amount: Float!
+  title: String
+}
+
+"""Create or Update an OrderShippingCharge"""
+input OrderShippingChargeInput {
+  amount: Float!
+  title: String
+}
+
 """Indicates the lifecycle stage an order is in"""
 enum OrderStatus {
   """Order has been authorized, waiting on fulfillment"""
   AUTHORIZED
+
+  """Order has been completely cancelled"""
+  CANCELLED
 
   """
   Order has been paid, and is now complete. This can also indicate that an order
@@ -964,8 +1066,19 @@ type OrderTransactionCurrencyExchangeAdjustment {
   targetCurrency: ResonanceCurrency!
 }
 
+"""Input for OrderTransactionCurrencyExchangeAdjustment"""
+input OrderTransactionCurrencyExchangeAdjustmentInput {
+  """The amount in the shop's default currency."""
+  targetAmount: Float!
+
+  """Shop's default currency."""
+  targetCurrency: ResonanceCurrency!
+}
+
 """Indicates which Payment Gateway was used for a Transaction."""
 enum OrderTransactionGateway {
+  AUTHORIZE_NET
+  MANUAL
   TEST
 }
 
@@ -1043,10 +1156,15 @@ type PageInfo {
 """
 The number of results to return for each term aggregation. Defaults to 0 for each.
 """
-input PageNumberOfTermAggregations {
+input PageNumberOfTermAggregationsInput {
   authors: Int
   pageTypes: Int
   tags: Int
+}
+
+"""A page that is being recommended for a requested reason."""
+type PageRecommendation {
+  pageId: ID!
 }
 
 """Indicates which field to sort by"""
@@ -1131,10 +1249,21 @@ enum ProductContentType {
 """
 The number of results to return for each term aggregation. Defaults to 0 for each.
 """
-input ProductNumberOfTermAggregations {
+input ProductNumberOfTermAggregationsInput {
   manufacturers: Int
   tags: Int
   vendors: Int
+}
+
+"""A product that is being recommended for a requested reason."""
+type ProductRecommendation {
+  """
+  Get the product associated with the recommendation.
+              
+  Requires the publicproduct/read scope.
+  """
+  product: PublicProduct
+  productId: ID!
 }
 
 """Indicates which field to sort by, defaults to CREATED_AT"""
@@ -1251,7 +1380,7 @@ type PublicCollection {
     """
     The number of results to return for each term aggregation. Defaults to 0 for each.
     """
-    numberOfTermAggregations: ProductNumberOfTermAggregations
+    numberOfTermAggregations: ProductNumberOfTermAggregationsInput
 
     """Optionally filter by price."""
     price: FloatRangeFilterInput
@@ -1309,6 +1438,32 @@ type PublicCollection {
 
   """Get the tags of the collection."""
   tags: CollectionTags
+
+  """
+  List TaxonomyBranches for a Collection.
+  This is very highly likely to only return a single TaxonomyBranch, unless this is an unusual use case.
+  
+  Requires the publictaxonomybranch/read permission.
+  """
+  taxonomyBranches(
+    """Returns the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Returns the elements in the list that come before the specified cursor.
+    """
+    before: String
+
+    """Returns the first n elements from the list."""
+    first: Int
+
+    """Returns the last n elements from the list."""
+    last: Int
+    taxonomyTree: String!
+  ): PublicTaxonomyBranchConnection!
+
+  """A tertiary image url for this collection, not often used."""
+  tertiaryImageUrl: String
 
   """The title of the collection, limit 256 characters."""
   title: String!
@@ -1530,6 +1685,7 @@ type PublicOrder {
   """
   placedAt: Date
   shippingAddress: Address!
+  shippingCharges: [OrderShippingCharge]
 
   """
   The status of the order currently, this field is read-only and can change many times over the course of the order
@@ -1578,13 +1734,37 @@ type PublicOrderEdge {
 
 """An item in a PublicOrder."""
 type PublicOrderItem {
+  """The price of the OrderItem after adjustments."""
+  adjustedPrice: Float!
+
+  """The quantity of the OrderItem after adjustments."""
+  adjustedQuantity: Int!
   adjustments: [OrderItemAdjustment]
+
+  """
+  The quantity of the OrderItem that has been assigned to a PurchaseOrderItem.
+  """
+  assignedQuantity: Int!
   barcode: String
   currency: ResonanceCurrency!
   customProperties: JSON
   deliveryMethod: VariantDeliveryMethod!
   demandHqId: ID!
+
+  """
+  The aggregate amount of all discounts applied to the OrderItem, can be subtracted from the subtotal directly.
+  """
+  discountTotal: Float!
   discounts: [OrderItemDiscount]
+
+  """The quantity of the OrderItem that has been fulfilled."""
+  fulfilledQuantity: Int!
+
+  """
+  The aggregate amount the consumer must pay for the item including price,
+  quantity, adjustments, discounts, shippingCharges, and taxes.
+  """
+  grandTotal: Float!
   note: String
   orderId: ID!
   orderItemId: ID!
@@ -1592,10 +1772,20 @@ type PublicOrderItem {
   productTitle: String!
   purchaseOrderItems: [OrderItemPurchaseOrderItem]
   quantity: Int!
-  shippingCharges: [OrderItemShippingCharge]
+  shippingCharges: [OrderShippingCharge]
+
+  """
+  The aggregate amount of all shipping charges applied to the OrderItem, can be added to the subtotal directly.
+  """
+  shippingChargesTotal: Float!
   shippingMethod: ShippingMethod
   sku: String
   status: OrderItemStatus!
+
+  """
+  The aggregate amount of all taxes applied to the OrderItem, can be added to the subtotal directly.
+  """
+  taxTotal: Float!
   taxes: [OrderItemTax]
 
   """Price per item, can be multiplied by quantity for total price"""
@@ -1704,6 +1894,9 @@ type PublicPage {
 
   """Get the tags of the page."""
   tags: PageTags
+
+  """A tertiary image url for this page, not often used."""
+  tertiaryImageUrl: String
 
   """The title of the page, limit 256 characters."""
   title: String!
@@ -1815,19 +2008,14 @@ type PublicProduct {
   """
   Get a productContentItem for a product
   
-          Requires productcontentitem/read permission on the requesting identity
+  Requires productcontentitem/read permission on the requesting identity
   """
   contentItem(contentItemId: ID!): PublicProductContentItem
 
   """
-  Get a list of productContentItems
+  Get a list of productContentItems. The sort order is always by position.
   
-          Requires productcontentitem/read permission on the DemandHq for the requesting identity
-  
-          Sorting works differently depending on which filters are used.
-          Without any filters, the sort order is by createdAt.
-          With a contentType filter, the sort order is by position.
-          This means "featuredImage" can be retrieved by using contentType: IMAGE and first: 1.
+  Requires productcontentitem/read permission on the DemandHq for the requesting identity.
   """
   contentItems(
     """Returns the elements in the list that come after the specified cursor."""
@@ -1940,7 +2128,7 @@ type PublicProductConnectionWithSearch {
 This has a many to one relationship with Product, and provides a connection to the CDN items.
 """
 type PublicProductContentItem {
-  alt: String!
+  alt: String
   category: String
   contentItemId: ID!
 
@@ -2059,6 +2247,12 @@ type PublicProductMetrics {
   The minimum price from all in stock variants (null if no variants are in stock)
   """
   priceMinimumInStock: Float
+
+  """All of the variants standardizedColors"""
+  standardizedColors: [VariantStandardizedColor!]!
+
+  """The standardizedColors of only in stock variants"""
+  standardizedColorsInStock: [VariantStandardizedColor!]!
 }
 
 """
@@ -2070,6 +2264,100 @@ type PublicStorefront {
   name: String!
   storefrontId: ID!
   urlDomain: String!
+}
+
+"""
+TaxonomyBranch is an item within a taxonomyTree that maps out a Product Taxonomy
+hierarchy using Product Tags and Collections.
+"""
+type PublicTaxonomyBranch {
+  """
+  Get the collection for a taxonomy branch.
+              
+  Requires the publiccollection/read scope.
+  """
+  collection: PublicCollection
+
+  """
+  The collectionId associated with the TaxonomyBranch.
+  Not required as a field, but is strongly suggested to be populated, and one is generally created with a TaxonomyBranch.
+  """
+  collectionId: ID
+  createdAt: Date!
+  demandHqId: ID!
+
+  """
+  The parent TaxonomyBranch for this TaxonomyBranch.
+  
+  Requires the publictaxonomybranch/read permission.
+  """
+  parentTaxonomyBranch: PublicTaxonomyBranch
+
+  """
+  All TaxonomyBranches besides the root have a parentTaxonomyBranchId. Immutable.
+  """
+  parentTaxonomyBranchId: ID
+
+  """
+  The product tag associated with this TaxonomyBranch, used for filtering or display matching.
+  
+  On a Root TaxonomyBranch, this is generally a taxPrefix that is used in all child TaxonomyBranches,
+  i.e. "Taxonomy" for child branch productTags like "Taxonomy,Category,T-Shirts"
+  """
+  productTag: String!
+
+  """
+  The storefronts this taxonomyTree is published to.
+  This is only present on the Root TaxonomyBranch of a taxonomyTree and applies to all child taxonomyBranches.
+  """
+  storefrontIds: [ID!]
+  taxonomyBranchId: ID!
+
+  """
+  List Child TaxonomyBranches for a TaxonomyBranch.
+              
+  Requires the publictaxonomybranch/read permission.
+  """
+  taxonomyBranches(
+    """Returns the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Returns the elements in the list that come before the specified cursor.
+    """
+    before: String
+
+    """Returns the first n elements from the list."""
+    first: Int
+
+    """Returns the last n elements from the list."""
+    last: Int
+  ): PublicTaxonomyBranchConnection!
+
+  """The level of the TaxonomyBranch in the hierarchy. Immutable."""
+  taxonomyLevel: TaxonomyLevel!
+
+  """
+  The tree this taxonomyBranch lies within. This has slug formatting (Lowercase, no spaces). Immutable.
+  """
+  taxonomyTree: String!
+
+  """The name of the taxonomyBranch."""
+  title: String!
+  updatedAt: Date!
+  updatedBy: ID!
+}
+
+"""Paginate through PublicTaxonomyBranches"""
+type PublicTaxonomyBranchConnection {
+  edges: [PublicTaxonomyBranchEdge]!
+  nodes: [PublicTaxonomyBranch]!
+  pageInfo: PageInfo!
+}
+
+"""One edge producing one TaxonomyBranch Node"""
+type PublicTaxonomyBranchEdge {
+  node: PublicTaxonomyBranch
 }
 
 """
@@ -2093,7 +2381,6 @@ type PublicVariant {
   contentItems: [PublicProductContentItem]
   deliveryMethod: VariantDeliveryMethod
   demandHqId: ID!
-  isTaxable: Boolean
 
   """Often same as vendor, but not always."""
   manufacturer: String
@@ -2124,7 +2411,7 @@ type PublicVariant {
   position: Int
 
   """Price for the defaultCurrency, can be any positive float number value."""
-  price: Float!
+  price: Float
 
   """
   Get the product associated with the variant.
@@ -2138,6 +2425,9 @@ type PublicVariant {
   """Stock Keeping Unit"""
   sku: String
   standardizedColor: VariantStandardizedColor
+
+  """Sales Tax Related Code, can match your chosen sales tax provider"""
+  taxCode: String
 
   """Get the title of this variant (combo of optionValues)"""
   title: String!
@@ -2219,19 +2509,16 @@ type Query {
   _empty: String
 
   """
+  Returns the analytics url for the storefront, with which you can send Analytics Interactions to be ingested.
+  """
+  analyticsIngestionUrl: String
+
+  """
   Get a collection by its slug.
   
   Requires the publiccollection/read scope.
   """
   collection(slug: String!): PublicCollection
-
-  """
-  Term aggregations for Collections, typically used to suggest terms to use in Search Filters.
-  """
-  collectionTermAggregations(
-    """The number of aggregations to return for each type."""
-    numberOfResults: Int!
-  ): CollectionTermAggregations
 
   """
   Get a collectionTypeContent by collectionType.
@@ -2287,7 +2574,7 @@ type Query {
     """
     The number of results to return for each term aggregation. Defaults to 0 for each.
     """
-    numberOfTermAggregations: CollectionNumberOfTermAggregations
+    numberOfTermAggregations: CollectionNumberOfTermAggregationsInput
 
     """
     Query collections for certain terms. Searches several fields, including
@@ -2403,14 +2690,6 @@ type Query {
   page(slug: String!): PublicPage
 
   """
-  Term aggregations for Pages, typically used to suggest terms to use in Search Filters.
-  """
-  pageTermAggregations(
-    """The number of aggregations to return for each type."""
-    numberOfResults: Int!
-  ): PageTermAggregations
-
-  """
   Get a pageTypeContent by pageType.
                   
   Requires the pagetypecontent/read scope on the associated DemandHq
@@ -2464,7 +2743,7 @@ type Query {
     """
     The number of results to return for each term aggregation. Defaults to 0 for each.
     """
-    numberOfTermAggregations: PageNumberOfTermAggregations
+    numberOfTermAggregations: PageNumberOfTermAggregationsInput
 
     """Filter Pages using pageType"""
     pageType: StringFilterInput
@@ -2497,14 +2776,6 @@ type Query {
   product(slug: String!): PublicProduct
 
   """
-  Term aggregations for Products, typically used to suggest terms to use in Search Filters.
-  """
-  productTermAggregations(
-    """The number of aggregations to return for each type."""
-    numberOfResults: Int!
-  ): ProductTermAggregations
-
-  """
   Paginate through products.
   
   Requires the publicproduct/read scope.
@@ -2533,7 +2804,7 @@ type Query {
     """
     The number of results to return for each term aggregation. Defaults to 0 for each.
     """
-    numberOfTermAggregations: ProductNumberOfTermAggregations
+    numberOfTermAggregations: ProductNumberOfTermAggregationsInput
 
     """Optionally filter by price."""
     price: FloatRangeFilterInput
@@ -2567,11 +2838,109 @@ type Query {
   ): PublicProductConnectionWithSearch!
 
   """
+  Recommend pages that are similar to a a customer's recent page activity.
+  """
+  recommendLikeRecentActivityPages(
+    customerOrDeviceId: String!
+
+    """The number of results to return. Max 100."""
+    numberOfResults: Int!
+  ): [PageRecommendation!]!
+
+  """
+  Recommend products that are similar to a a customer's recent product activity.
+  """
+  recommendLikeRecentActivityProducts(
+    customerOrDeviceId: String!
+
+    """The number of results to return. Max 100."""
+    numberOfResults: Int!
+  ): [ProductRecommendation!]!
+
+  """Recommend pages that are similar to a given page(s)."""
+  recommendMoreLikeThisPages(
+    """The number of results to return. Max 100."""
+    numberOfResults: Int!
+
+    """
+    The page(s) to find similar pages for. If this is provided, pageSlugs will be ignored.
+    """
+    pageIds: [ID!]
+
+    """
+    The page slug(s) to find similar pages for. If pageIds is not provided, this is required.
+    """
+    pageSlugs: [String!]
+  ): [PageRecommendation!]!
+
+  """Recommend products that are similar to a given product(s)."""
+  recommendMoreLikeThisProducts(
+    """The number of results to return. Max 100."""
+    numberOfResults: Int!
+
+    """
+    The product(s) to find similar products for. If this is provided, productSlugs will be ignored.
+    """
+    productIds: [ID!]
+
+    """
+    The product slug(s) to find similar products for. If productIds is not provided, this is required.
+    """
+    productSlugs: [String!]
+  ): [ProductRecommendation!]!
+
+  """
+  Recommend pages that have been recently viewed by a customer or device.
+  """
+  recommendRecentlyViewedPages(
+    customerOrDeviceId: String!
+
+    """The number of results to return. Max 100."""
+    numberOfResults: Int!
+  ): [PageRecommendation!]!
+
+  """
+  Recommend products that have been recently viewed by a customer or device.
+  """
+  recommendRecentlyViewedProducts(
+    customerOrDeviceId: String!
+
+    """The number of results to return. Max 100."""
+    numberOfResults: Int!
+  ): [ProductRecommendation!]!
+
+  """
   Get the storefront associated with the requesting storefront identity.
               
   Requires the "publicstorefront/read" permission.
   """
   storefront: PublicStorefront
+
+  """
+  List TaxonomyBranches.
+              
+  Requires the publictaxonomybranch/read permission.
+  """
+  taxonomyBranches(
+    """Returns the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Returns the elements in the list that come before the specified cursor.
+    """
+    before: String
+
+    """Returns the first n elements from the list."""
+    first: Int
+    href: String
+    hrefPrefix: String
+
+    """Returns the last n elements from the list."""
+    last: Int
+    taxonomyBranchIds: [ID]
+    taxonomyBranchLevel: TaxonomyLevel
+    taxonomyBranchType: String
+  ): PublicTaxonomyBranchConnection!
 }
 
 """Used throughout the app to give a currency to price information"""
@@ -2627,12 +2996,57 @@ input StringFilterInput {
   values: [String!]!
 }
 
+"""The level of the TaxonomyBranch in the hierarchy."""
+enum TaxonomyLevel {
+  """
+  The second most outer categorization for a Product, generally describing a
+  broad, but slightly refined grouping of products.
+  "Clothing", "Shoes", "Computers", "TVs"
+  """
+  CATEGORY
+
+  """
+  The outermost categorization for a Product, generally describing a very broad grouping.
+  "Apparel", "Electronics", "Home & Garden"
+  """
+  DEPARTMENT
+
+  """
+  Only a single TaxonomyBranch can live at this level, and it is the basis for the entire taxonomyTree.
+  """
+  ROOT
+
+  """
+  The third most outer categorization for a Product, generally describing a specific grouping of products.
+  "T-Shirts", "Jeans", "Sneakers", "Laptops", "Smartphones"
+  """
+  SUBCATEGORY1
+
+  """
+  An additional Subcategory level for a Product, generally describing a very specific grouping of products.
+  """
+  SUBCATEGORY2
+
+  """
+  An additional Subcategory level for a Product, generally describing a very, very specific grouping of products.
+  """
+  SUBCATEGORY3
+}
+
 """
 Indicates the key of the term aggregation, and approximately how many documents it occurs in. 
 """
 type TermAggregation {
   docCount: Int!
   key: String!
+}
+
+"""The result of validating a checkout"""
+type ValidateCheckoutResponse {
+  checkout: Checkout!
+
+  """A list of errors that occurred during validation, if any."""
+  errors: [CheckoutError]
 }
 
 """How this variant gets delivered. Defaults to SHIPPING."""

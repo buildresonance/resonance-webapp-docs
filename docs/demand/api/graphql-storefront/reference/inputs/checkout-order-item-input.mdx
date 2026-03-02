@@ -21,7 +21,7 @@ input CheckoutOrderItemInput {
   discounts: [OrderItemDiscountInput]
   note: String
   quantity: Int
-  shippingCharges: [OrderItemShippingChargeInput]
+  shippingCharges: [OrderShippingChargeInput]
   shippingMethod: ShippingMethod
   taxes: [OrderItemTaxInput]
   unitPrice: Float
@@ -48,7 +48,7 @@ input CheckoutOrderItemInput {
 > 
 > 
 
-#### [<code style={{ fontWeight: 'normal' }}>CheckoutOrderItemInput.<b>shippingCharges</b></code>](#)<Bullet />[`[OrderItemShippingChargeInput]`](/demand/api/graphql-storefront/reference/inputs/order-item-shipping-charge-input) <Badge class="secondary" text="list"/> <Badge class="secondary" text="input"/>
+#### [<code style={{ fontWeight: 'normal' }}>CheckoutOrderItemInput.<b>shippingCharges</b></code>](#)<Bullet />[`[OrderShippingChargeInput]`](/demand/api/graphql-storefront/reference/inputs/order-shipping-charge-input) <Badge class="secondary" text="list"/> <Badge class="secondary" text="input"/>
 > 
 > 
 
@@ -61,7 +61,7 @@ input CheckoutOrderItemInput {
 > 
 
 #### [<code style={{ fontWeight: 'normal' }}>CheckoutOrderItemInput.<b>unitPrice</b></code>](#)<Bullet />[`Float`](/demand/api/graphql-storefront/reference/scalars/float) <Badge class="secondary" text="scalar"/>
-> 
+> Price per item, can be multiplied by quantity for total price
 > 
 
 #### [<code style={{ fontWeight: 'normal' }}>CheckoutOrderItemInput.<b>variantId</b></code>](#)<Bullet />[`ID!`](/demand/api/graphql-storefront/reference/scalars/id) <Badge class="secondary" text="non-null"/> <Badge class="secondary" text="scalar"/>

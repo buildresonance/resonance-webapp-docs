@@ -169,12 +169,12 @@ module.exports = {
             {
                 docs: {
                     routeBasePath: "/",
-                    sidebarPath: require.resolve("./sidebars.js"),
+                    sidebarPath: "./sidebars.js",
                     editUrl:
                         "https://github.com/obfns/resonance-webapp-docs/tree/main",
                 },
                 theme: {
-                    customCss: require.resolve("./src/css/custom.css"),
+                    customCss: "./src/css/custom.css",
                 },
                 sitemap: {
                     changefreq: "weekly",

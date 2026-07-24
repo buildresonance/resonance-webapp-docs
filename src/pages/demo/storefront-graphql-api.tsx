@@ -1,10 +1,10 @@
 import { createGraphiQLFetcher } from "@graphiql/toolkit";
-import GraphiQL from "graphiql";
+import { GraphiQL } from "graphiql";
 import BrowserOnly from "@docusaurus/BrowserOnly";
 import React, { ReactElement } from "react";
 import Layout from "@theme/Layout";
 
-import "graphiql/graphiql.css";
+import "graphiql/style.css";
 
 const DEFAULT_QUERY = `# Welcome to GraphiQL
 #
@@ -82,7 +82,7 @@ const StorefrontApiDemo = (): ReactElement => {
                         return (
                             <GraphiQL
                                 fetcher={fetcher}
-                                defaultQuery={DEFAULT_QUERY}
+                                initialQuery={DEFAULT_QUERY}
                             />
                         );
                     }}

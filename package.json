@@ -32,7 +32,7 @@
     "@docusaurus/preset-classic": "^3.10.1",
     "@graphiql/toolkit": "^0.12.1",
     "@graphql-markdown/docusaurus": "^1.16.6",
-    "@graphql-tools/graphql-file-loader": "^7.5.16",
+    "@graphql-tools/graphql-file-loader": "^9.1.2",
     "@mdx-js/react": "^3.0.0",
     "@svgr/webpack": "^6.5.1",
     "clsx": "^1.2.1",
